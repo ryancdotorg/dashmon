@@ -1,0 +1,7 @@
+.*
+!.gitignore
+*.sqlite
+*.sqlite*
+*.sock
+*.lock
+**/__pycache__

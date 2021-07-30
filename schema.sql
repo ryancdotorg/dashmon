@@ -1,0 +1,22 @@
+CREATE TABLE buttons
+(
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	mac TEXT UNIQUE NOT NULL,
+	label TEXT DEFAULT NULL,
+	actions TEXT DEFAULT '[]'
+);
+
+CREATE TABLE events
+(
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	ts DATETIME DEFAULT CURRENT_TIMESTAMP,
+	button_id INTEGER,
+	data TEXT NOT NULL,
+	FOREIGN KEY(button_id) REFERENCES buttons(id)
+);
+
+CREATE INDEX event_ident
+ON events
+(
+	JSON_EXTRACT(data, '$.ident')
+);
