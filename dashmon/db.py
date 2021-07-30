@@ -1,3 +1,5 @@
+__all__ = ['Database']
+
 import logging
 logger = logging.getLogger(__name__)
 

@@ -26,6 +26,7 @@ import datetime
 import pcapy
 
 import dashmon
+from dashmon import Database, API, ImageReceiverFactory, ImageServerFactory
 
 from time import time, sleep, monotonic
 from binascii import hexlify
@@ -36,13 +37,6 @@ from twisted.internet.protocol import Factory
 from twisted.internet.endpoints import clientFromString, serverFromString
 from twisted.application.internet import ClientService, backoffPolicy
 from twisted.protocols.basic import Int32StringReceiver
-
-from twisted.web import http, resource
-from twisted.web.resource import Resource
-from twisted.web.server import Site
-from twisted.web.static import File as _File
-
-from klein import Klein
 
 from autobahn.twisted.resource import WebSocketResource
 from autobahn.twisted.websocket import WebSocketServerProtocol, WebSocketServerFactory
@@ -58,76 +52,12 @@ ch = logging.StreamHandler()
 ch.setLevel(logging.DEBUG)
 logger.addHandler(ch)
 
-# create a function that just returns a given value regardless of arguments
-def const(x):
-    return lambda *a, **k: x
-
-class File(_File):
-    contentEncodings = {}
-    indexNames = ["index.html"]
-    forbidden = re.compile(rb'(?:[.].*|Makefile|[.](?:sh|swp|bak))')
-
-    def __init__(self, path, defaultType='application/octet-stream', *args, **kwargs):
-        defaultType = kwargs.pop('defaultType', defaultType)
-        super().__init__(path, defaultType, *args, **kwargs)
-
-    def getChild(self, path, request):
-        if self.forbidden.fullmatch(path):
-            return resource.ForbiddenResource()
-        else:
-            return super().getChild(path, request)
-
-    def directoryListing(self):
-        return resource.ForbiddenResource()
-
-class ExtEncoder(json.JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, datetime.datetime):
-            return int(obj.timestamp() * 1000)
-
-        return super().default(obj)
-
 class Actions:
     def __init__(self, mqtt):
         self.mqtt = mqtt
 
     def publish(self, pr, topic, message):
         self.mqtt.publish(topic, message)
-
-class ImageReceiver(Int32StringReceiver):
-    def stringReceived(self, string):
-        self.factory.ws_factory.sendMessageAll(b'image\0' + string, True)
-
-class ImageReceiverFactory(Factory):
-    protocol = ImageReceiver
-
-    def __init__(self, ws_factory):
-        self.ws_factory = ws_factory
-
-class ImageProtocol(WebSocketServerProtocol):
-    def onOpen(self):
-        self.factory.clients.add(self)
-
-    def onClose(self, wasClean, code, reason):
-        self.factory.clients.discard(self)
-
-    def onPingMessage(self, isBinary):
-        self.sendMessage(b'pong', isBinary)
-
-    def onMessage(self, payload, isBinary):
-        if payload == b'ping': return self.onPingMessage(isBinary)
-        logger.info(f'binary:{isBinary} {payload}')
-
-class ImageServerFactory(WebSocketServerFactory):
-    protocol = ImageProtocol
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.clients = set()
-
-    def sendMessageAll(payload, isBinary):
-        for client in list(self.clients):
-            if client.transport.is_closing(): self.clients.discard(client)
-            else: client.sendMessage(payload, isBinary)
 
 class MQTTService(ClientService):
     def __init__(self, endpoint, factory, username=None, password=None):
@@ -170,38 +100,6 @@ def _capture(iface, cap, decoder, handler):
     fn = decoder(iface, cap, handler)
     cap.loop(-1, lambda h, d: reactor.callFromThread(fn, h, d))
 
-api = Klein()
-db = dashmon.db.Database()
-
-def response(req, content, type_='text/html'):
-    if   isinstance(content, bytes):     pass
-    elif isinstance(content, bytearray): content = bytes(content)
-    elif isinstance(content, str):       content = content.encode()
-    else:                                content = str(content).encode()
-
-    req.setHeader('Content-Type', type_)
-    req.setHeader('Content-Length', str(len(content)))
-    return content
-
-def json_response(req, content):
-    j = json.dumps(content, cls=ExtEncoder) + '\n'
-    return response(req, j, 'application/json')
-
-ws_factory = ImageServerFactory()
-
-@api.route('/recent')
-def api_recent(req):
-    return json_response(req, db.get_recent())
-
-@api.route('/ws')
-def api_websocket(req):
-    return WebSocketResource(ws_factory)
-
-# Invoke the decorator directly to add a constant valued route
-api.route('/', branch=True)(
-    const(File('./static'))
-)
-
 # without the signal handler, ctrl-c doesn't work...
 def exit(n, *args):
     logger.warning(f'Signal {n} caught, exiting...')
@@ -221,6 +119,11 @@ def main():
     # assumes ssid will be first tlv in probe request
     bpf = f'{probe_req} and wlan[24] = 0 and wlan[25] > 4 and wlan[26:4] = 0x{hex_prefix}'
     #bpf = f'{probe_req}'
+
+    db = Database()
+    api = API(db)
+    ir_factory = ImageReceiverFactory()
+    api.route('/ws')(ir_factory.Resource)
 
     mqtt_factory = MQTTFactory(profile=MQTTFactory.PUBLISHER)
     mqtt_endpoint = clientFromString(reactor, BROKER)
@@ -248,12 +151,10 @@ def main():
     mqtt_service.startService()
 
     # klein api server
-    api_endpoint = serverFromString(reactor, 'tcp:8040:interface=0.0.0.0')
-    api_endpoint.listen(Site(api.resource()))
+    api.listen(reactor, 'tcp:8040:interface=0.0.0.0')
 
     # image receiver
-    image_receiver = serverFromString(reactor, 'unix:./img.sock')
-    image_receiver.listen(ImageReceiverFactory(ws_factory))
+    ir_factory.listen(reactor, 'unix:./img.sock')
 
     reactor.run()
 
