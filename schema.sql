@@ -6,7 +6,7 @@ CREATE TABLE buttons
 	actions TEXT DEFAULT '[]'
 );
 
-CREATE TABLE events
+CREATE TABLE presses
 (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	ts DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -15,8 +15,16 @@ CREATE TABLE events
 	FOREIGN KEY(button_id) REFERENCES buttons(id)
 );
 
-CREATE INDEX event_ident
-ON events
+CREATE TABLE events
+(
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	ts DATETIME DEFAULT CURRENT_TIMESTAMP,
+	topic TEXT NOT NULL,
+	payload TEXT DEFAULT '{}'
+);
+
+CREATE INDEX press_ident
+ON presses
 (
 	JSON_EXTRACT(data, '$.ident')
 );

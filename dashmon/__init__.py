@@ -1,7 +1,7 @@
 from . import *
 
 """Import all modules that exist in the current directory."""
-# Ref https://rya.nc/so/60861023
+# Based on https://rya.nc/so/60861023
 from importlib import import_module
 from pathlib import Path
 

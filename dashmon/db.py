@@ -152,6 +152,14 @@ class Database:
             raise
         else: self.con.commit()
 
+    def log_event(self, topic, payload):
+        with self.trxn() as con:
+            cur = self._cursor()
+            cur.execute(
+                'INSERT INTO events (topic, payload) VALUES(?, JSON(?))',
+                (topic, json.dumps(payload))
+            )
+
     def log_press(self, pr):
         with self.trxn() as con:
             cur = self._cursor()
@@ -169,7 +177,7 @@ class Database:
                 ).lastrowid
 
             cur.execute(
-                'INSERT INTO events (button_id, data) VALUES(?, JSON(?))',
+                'INSERT INTO presses (button_id, data) VALUES(?, JSON(?))',
                 (button_id, pr.to_json())
             )
 
@@ -192,9 +200,9 @@ class Database:
                 button_id,
                 label,
                 data as "data [json]"
-            FROM events
+            FROM presses
             INNER JOIN buttons
-                ON buttons.id = events.button_id
+                ON buttons.id = presses.button_id
             WHERE ts > DATETIME(CURRENT_TIMESTAMP, "-7 days")
             ORDER BY ts DESC
         ''')

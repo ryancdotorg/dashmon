@@ -17,11 +17,14 @@ class ImageReceiver(Int32StringReceiver):
 class ImageReceiverFactory(Factory):
     protocol = ImageReceiver
 
-    def __init__(self, ws_factory=None):
+    def __init__(self, klein=None, ws_factory=None):
         if ws_factory is None:
             self.ws_factory = ImageServerFactory()
         else:
             self.ws_factory = ws_factory
+
+        if klein is not None:
+            klein.route('/ws')(self.Resource)
 
     def Resource(self, req):
         return WebSocketResource(self.ws_factory)
